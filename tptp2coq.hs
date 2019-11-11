@@ -7,7 +7,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.DList (DList)
 import qualified Data.DList as DList
-import Data.Text (unpack)
+import Data.Text (Text,unpack)
 import qualified Data.Text.IO
 import Data.TPTP.Parse.Text
 import Data.Attoparsec.Text
@@ -28,7 +28,7 @@ printCoqHeader :: Map String Int -> Map String Int -> IO ()
 printCoqHeader preds funs = do
   putStrLn "From Hammer Require Import Tactics.\n"
   putStrLn "Section FOFProblem.\n"
-  putStrLn ("Variable " ++ coqUniverse ++ " : Set.")
+  putStrLn ("Variable " ++ coqUniverse ++ " : Set.\n")
   Map.foldrWithKey (\k n acc -> acc >> printCoqVar "Prop" k n) (return ()) preds
   putStrLn ""
   Map.foldrWithKey (\k n acc -> acc >> printCoqVar coqUniverse k n) (return ()) funs
@@ -37,13 +37,13 @@ printCoqHeader preds funs = do
 printCoqFooter :: IO ()
 printCoqFooter = putStrLn "\nEnd FOFProblem."
 
-
 --------------------------------------------------------------------------------
 -- Translator monad
 
 -- map names to arity
 data TranslState = TranslState {
       filename :: String,
+      ident :: Int,
       predicates :: Map String Int,
       functions :: Map String Int }
 
@@ -57,6 +57,18 @@ tellChar c = tell (DList.singleton c)
 
 tellStrLn :: String -> Translator ()
 tellStrLn s = tellStr s >> tellChar '\n'
+
+nextIdent :: Translator Int
+nextIdent = do
+  s <- get
+  let i = ident s
+  put (s{ident = i + 1})
+  return i
+
+getName :: Text -> Translator String
+getName txt = do
+  i <- nextIdent
+  return (unpack txt ++ "_" ++ show i)
 
 addPred :: String -> Int -> Translator ()
 addPred name n = do
@@ -81,12 +93,11 @@ failTransl err = do
 
 runTranslator :: String -> Translator a -> IO a
 runTranslator filename tr = do
-  ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename Map.empty Map.empty)
+  ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename 1 Map.empty Map.empty)
   printCoqHeader (predicates s) (functions s)
   putStr (DList.toList w)
   printCoqFooter
   return a
-
 
 --------------------------------------------------------------------------------
 -- Translation
@@ -161,15 +172,18 @@ translateFormula (Connected left conn right) = do
   translateConnective conn left right
   tellChar ')'
 translateFormula (Quantified quant nlst body) = do
+  tellChar '('
   translateQuantifier quant
   let vars = map fst (Data.List.NonEmpty.toList nlst)
   mapM_ (\(Var txt) -> tellStr (" " ++ (unpack txt))) vars
   tellStr (" : " ++ coqUniverse ++ ", ")
   translateFormula body
+  tellChar ')'
 translateFormula _ = failTransl "unsupported formula"
 
-translateAxiom :: String -> UnsortedFirstOrder -> Translator ()
-translateAxiom name formula = do
+translateAxiom :: Text -> UnsortedFirstOrder -> Translator ()
+translateAxiom txt formula = do
+  name <- getName txt
   tellStr "Variable "
   tellStr name
   tellStr " : "
@@ -186,16 +200,16 @@ translateUnit (Include _ (Just _)) =
 translateUnit (Unit (Left (Atom txt)) (Formula (Standard ax) (FOF formula)) _)
     | ax == Axiom || ax == Hypothesis || ax == Assumption || ax == Lemma ||
       ax == Theorem || ax == Corollary =
-           translateAxiom (unpack txt) formula
+          translateAxiom txt formula
 translateUnit (Unit (Left (Atom txt)) (Formula (Standard Conjecture) (FOF formula)) _) = do
-  let name = unpack txt
+  name <- getName txt
   tellStr "\nTheorem "
   tellStr name
   tellStr " : "
   translateFormula formula
   tellStrLn "."
   tellStrLn "Proof."
-  tellStrLn "   hprover."
+  tellStrLn "  hprover."
   tellStrLn "Qed."
 translateUnit _ =
     failTransl "unsupported declaration"
