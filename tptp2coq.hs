@@ -21,14 +21,15 @@ coqUniverse = "Universe"
 
 printCoqVar :: String -> String -> Int -> IO ()
 printCoqVar retType p n =
-    putStrLn ("Variable " ++ p ++ " : " ++ concat (replicate n (coqUniverse ++ " -> ")) ++
+    putStrLn ("Variable " ++ p ++ "_ : " ++ concat (replicate n (coqUniverse ++ " -> ")) ++
                           retType ++ ".")
 
 printCoqHeader :: Map String Int -> Map String Int -> IO ()
 printCoqHeader preds funs = do
   putStrLn "From Hammer Require Import Tactics.\n"
   putStrLn "Section FOFProblem.\n"
-  putStrLn ("Variable " ++ coqUniverse ++ " : Set.\n")
+  putStrLn ("Variable " ++ coqUniverse ++ " : Set.")
+  putStrLn ("Variable UniverseElement : " ++ coqUniverse ++ ".\n")
   Map.foldrWithKey (\k n acc -> acc >> printCoqVar "Prop" k n) (return ()) preds
   putStrLn ""
   Map.foldrWithKey (\k n acc -> acc >> printCoqVar coqUniverse k n) (return ()) funs
@@ -44,6 +45,7 @@ printCoqFooter = putStrLn "\nEnd FOFProblem."
 data TranslState = TranslState {
       filename :: String,
       ident :: Int,
+      conjectureRegistered :: Bool,
       predicates :: Map String Int,
       functions :: Map String Int }
 
@@ -91,11 +93,23 @@ failTransl err = do
   s <- get
   fail (filename s ++ ": " ++ err)
 
+registerConjecture :: Translator ()
+registerConjecture = do
+  s <- get
+  if conjectureRegistered s then
+      failTransl "more than one conjecture"
+  else
+      put (s{conjectureRegistered = True})
+
 runTranslator :: String -> Translator a -> IO a
 runTranslator filename tr = do
-  ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename 1 Map.empty Map.empty)
+  ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename 1 False Map.empty Map.empty)
   printCoqHeader (predicates s) (functions s)
   putStr (DList.toList w)
+  if conjectureRegistered s then
+      return ()
+  else
+      putStrLn ("\nTheorem conjecture_" ++ show (ident s) ++ " : False.\nProof.\n  hprover.\nQed.")
   printCoqFooter
   return a
 
@@ -106,7 +120,7 @@ translateFunc :: Bool -> String -> [Term] -> Translator ()
 translateFunc paren name args = do
   let paren2 = paren && args /= []
   if paren2 then tellChar '(' else return ()
-  tellStr name
+  tellStr (name ++ "_")
   mapM (\x -> tellChar ' ' >> translateTerm x) args
   if paren2 then tellChar ')' else return ()
 
@@ -203,6 +217,7 @@ translateUnit (Unit (Left (Atom txt)) (Formula (Standard ax) (FOF formula)) _)
           translateAxiom txt formula
 translateUnit (Unit (Left (Atom txt)) (Formula (Standard Conjecture) (FOF formula)) _) = do
   name <- getName txt
+  registerConjecture
   tellStr "\nTheorem "
   tellStr name
   tellStr " : "

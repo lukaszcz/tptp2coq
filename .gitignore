@@ -21,6 +21,5 @@ cabal.project.local~
 .HTF/
 .ghc.environment.*
 *~
-ILTP
-ILTP-coq
+ILTP*
 tptp2coq
