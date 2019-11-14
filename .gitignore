@@ -22,4 +22,6 @@ cabal.project.local~
 .ghc.environment.*
 *~
 ILTP*
+logs/
+problems
 tptp2coq
