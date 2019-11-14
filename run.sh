@@ -1,12 +1,13 @@
 #!/bin/bash
 
-if [ "$#" -ne 3 ]; then
-    echo "usage: run.sh [-v] num_cores time_limit_in_s directory [email]"
-    exit 1
-fi
-
 if [ "$1" = "-v" ]; then
     VERBOSE=1
+    shift
+fi
+
+if [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
+    echo "usage: run.sh [-v] num_cores time_limit_in_s directory [email]"
+    exit 1
 fi
 
 N=$1
@@ -19,7 +20,13 @@ rm problems/*.vo 2> /dev/null
 rm -rf logs 2> /dev/null
 mkdir logs
 
-make -f Makefile.coq -j $N LIMIT=$LIMIT
+if [ "$VERBOSE" = "1" ]; then
+    make -f Makefile.coq -j $N LIMIT=$LIMIT VERBOSE=1
+else
+    make -f Makefile.coq -j $N LIMIT=$LIMIT
+fi
+
+rm problems/*.{vo,glob}
 
 echo -n "Successes: "
 grep "Tactic call ran for .* (success)" logs/*.log | wc -l
@@ -41,6 +48,8 @@ echo -n "Successes (1.00): "
 echo
 echo -n "Successes (< 1s): "
 ./count_time.sh 1
+echo -n "Successes (< 5s): "
+./count_time.sh 5
 echo -n "Successes (< 10s): "
 ./count_time.sh 10
 echo -n "Successes (< 30s): "
