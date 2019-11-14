@@ -28,6 +28,8 @@ fi
 
 rm problems/*.{vo,glob}
 
+echo -n "Total problems: "
+ls problems/*.v | wc -l
 echo -n "Successes: "
 grep "Tactic call ran for .* (success)" logs/*.log | wc -l
 echo -n "Failures: "

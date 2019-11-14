@@ -19,20 +19,32 @@ import Data.TPTP
 coqUniverse :: String
 coqUniverse = "Universe"
 
-printCoqVar :: String -> String -> Int -> IO ()
-printCoqVar retType p n =
-    putStrLn ("Variable " ++ p ++ "_ : " ++ concat (replicate n (coqUniverse ++ " -> ")) ++
-                          retType ++ ".")
+printCoqVar :: Bool -> String -> String -> Int -> IO ()
+printCoqVar addEqAxioms retType p n = do
+  putStrLn ("Variable " ++ p ++ "_ : " ++ concat (replicate n (coqUniverse ++ " -> ")) ++
+                        retType ++ ".")
+  when (addEqAxioms && n > 0) $
+      let xs = map (\x -> "x" ++ show x) [1..n] in
+      let ys = map (\x -> "y" ++ show x) [1..n] in
+      let sxs = concatMap (\x -> x ++ " ") xs in
+      let sys = concatMap (\x -> x ++ " ") ys in
+      putStrLn ("Variable EqCongruence_" ++ p ++ " : forall " ++ sxs ++ sys ++ ": " ++
+                coqUniverse ++ ", " ++ concat (zipWith (\x y -> x ++ " = " ++ y ++ " -> ") xs ys) ++
+                p ++ "_ " ++ sxs ++ (if retType == "Prop" then "-> " else "= ") ++ p ++ "_ " ++ sys ++ ".")
 
-printCoqHeader :: Map String Int -> Map String Int -> IO ()
-printCoqHeader preds funs = do
-  putStrLn "From Hammer Require Import Tactics.\n"
+printCoqHeader :: Bool -> Map String Int -> Map String Int -> IO ()
+printCoqHeader addEqAxioms preds funs = do
   putStrLn "Section FOFProblem.\n"
   putStrLn ("Variable " ++ coqUniverse ++ " : Set.")
   putStrLn ("Variable UniverseElement : " ++ coqUniverse ++ ".\n")
-  Map.foldrWithKey (\k n acc -> acc >> printCoqVar "Prop" k n) (return ()) preds
+  when addEqAxioms $
+      do
+        putStrLn ("Variable EqTransitivity : forall x y z : " ++ coqUniverse ++ ", x = y -> y = z -> x = z.")
+        putStrLn ("Variable EqSymmetry : forall x y : " ++ coqUniverse ++ ", x = y -> y = x.")
+        putStrLn ("Variable EqReflexivity : forall x : " ++ coqUniverse ++ ", x = x.")
+  Map.foldrWithKey (\k n acc -> acc >> printCoqVar addEqAxioms "Prop" k n) (return ()) preds
   putStrLn ""
-  Map.foldrWithKey (\k n acc -> acc >> printCoqVar coqUniverse k n) (return ()) funs
+  Map.foldrWithKey (\k n acc -> acc >> printCoqVar addEqAxioms coqUniverse k n) (return ()) funs
   putStrLn ""
 
 printCoqFooter :: IO ()
@@ -45,7 +57,9 @@ printCoqFooter = putStrLn "\nEnd FOFProblem."
 data TranslState = TranslState {
       filename :: String,
       ident :: Int,
+      foOutput :: Bool,
       conjectureRegistered :: Bool,
+      equalityRegistered :: Bool,
       predicates :: Map String Int,
       functions :: Map String Int }
 
@@ -101,15 +115,25 @@ registerConjecture = do
   else
       put (s{conjectureRegistered = True})
 
-runTranslator :: String -> Translator a -> IO a
-runTranslator filename tr = do
-  ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename 1 False Map.empty Map.empty)
-  printCoqHeader (predicates s) (functions s)
+registerEquality :: Translator ()
+registerEquality = do
+  s <- get
+  put (s{equalityRegistered = True})
+
+isFoOutput :: Translator Bool
+isFoOutput = do
+  s <- get
+  return (foOutput s)
+
+runTranslator :: Bool -> String -> Translator a -> IO a
+runTranslator fo filename tr = do
+  ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename 1 fo False False Map.empty Map.empty)
+  when fo $ putStrLn "From Hammer Require Import Tactics.\n"
+  printCoqHeader (fo && equalityRegistered s) (predicates s) (functions s)
   putStr (DList.toList w)
-  if conjectureRegistered s then
-      return ()
-  else
-      putStrLn ("\nTheorem conjecture_" ++ show (ident s) ++ " : False.\nProof.\n  hprover.\nQed.")
+  unless (conjectureRegistered s) $
+         putStrLn ("\nTheorem conjecture_" ++ show (ident s) ++ " : False.\nProof.\n  " ++
+                   (if fo then "time solve [ firstorder ]" else "hprover") ++ ".\nQed.")
   printCoqFooter
   return a
 
@@ -119,10 +143,10 @@ runTranslator filename tr = do
 translateFunc :: Bool -> String -> [Term] -> Translator ()
 translateFunc paren name args = do
   let paren2 = paren && args /= []
-  if paren2 then tellChar '(' else return ()
+  when paren2 $ tellChar '('
   tellStr (name ++ "_")
   mapM (\x -> tellChar ' ' >> translateTerm x) args
-  if paren2 then tellChar ')' else return ()
+  when paren2 $ tellChar ')'
 
 translateTerm :: Term -> Translator ()
 translateTerm (Function (Defined (Atom txt)) args) =  do
@@ -174,6 +198,7 @@ translateFormula (Atomic (Predicate (Defined (Atom txt)) args)) = do
   addPred name (length args)
   translateFunc False name args
 translateFormula (Atomic (Equality left sign right)) = do
+  registerEquality
   translateTerm left
   if sign == Positive then tellStr " = " else tellStr " <> "
   translateTerm right
@@ -216,6 +241,8 @@ translateUnit (Unit (Left (Atom txt)) (Formula (Standard ax) (FOF formula)) _)
       ax == Theorem || ax == Corollary =
           translateAxiom txt formula
 translateUnit (Unit (Left (Atom txt)) (Formula (Standard Conjecture) (FOF formula)) _) = do
+  fo <- isFoOutput
+  when fo $ tellStrLn "\nSet Firstorder Depth 10."
   name <- getName txt
   registerConjecture
   tellStr "\nTheorem "
@@ -224,7 +251,10 @@ translateUnit (Unit (Left (Atom txt)) (Formula (Standard Conjecture) (FOF formul
   translateFormula formula
   tellStrLn "."
   tellStrLn "Proof."
-  tellStrLn "  hprover."
+  if fo then
+      tellStrLn "  time solve [ firstorder ]."
+  else
+      tellStrLn "  hprover."
   tellStrLn "Qed."
 translateUnit _ =
     failTransl "unsupported declaration"
@@ -241,8 +271,10 @@ translateFile h = do
 
 main = do
   args <- getArgs
-  if length args /= 1 then
-      hPutStrLn stderr $ "Usage: tptp2coq file.p"
-  else
-      let filename = head args in
-      withFile filename ReadMode (runTranslator filename . translateFile)
+  case args of
+    [ filename ] ->
+       withFile filename ReadMode (runTranslator False filename . translateFile)
+    [ "-f", filename ] ->
+       withFile filename ReadMode (runTranslator True filename . translateFile)
+    _ ->
+       hPutStrLn stderr $ "Usage: tptp2coq file.p"

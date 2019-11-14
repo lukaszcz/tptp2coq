@@ -14,7 +14,7 @@ do
     grep '% ' $tmp >> $out
     echo '*)' >> $out
     echo >> $out
-    ../tptp2coq $tmp >> $out
+    ../tptp2coq $1 $tmp >> $out
     rm $tmp
 done
 cd ..
