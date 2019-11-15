@@ -9,9 +9,9 @@ for f in `find Problems -name "*.p" -print`
 do
     out=../ILTP-coq/`basename $f .p`.v
     tmp=$f.tmp
-    iconv -c -t UTF-8 $f | tr -d '"' > $tmp
+    iconv -c -t UTF-8 $f > $tmp
     echo '(*' > $out
-    grep '% ' $tmp >> $out
+    grep '% ' $tmp | tr -d '"' >> $out
     echo '*)' >> $out
     echo >> $out
     ../tptp2coq $1 $tmp >> $out
