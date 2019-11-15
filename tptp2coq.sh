@@ -5,7 +5,7 @@ rm -rf ILTP-coq*
 # translate the problems from FOF TPTP to Coq format
 mkdir ILTP-coq
 cd ILTP
-for f in `find -name "*.p" -print`
+for f in `find Problems -name "*.p" -print`
 do
     out=../ILTP-coq/`basename $f .p`.v
     tmp=$f.tmp

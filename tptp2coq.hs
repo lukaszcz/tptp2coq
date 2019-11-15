@@ -128,7 +128,7 @@ isFoOutput = do
 runTranslator :: Bool -> String -> Translator a -> IO a
 runTranslator fo filename tr = do
   ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename 1 fo False False Map.empty Map.empty)
-  when fo $ putStrLn "From Hammer Require Import Tactics.\n"
+  unless fo $ putStrLn "From Hammer Require Import Tactics.\n"
   printCoqHeader (fo && equalityRegistered s) (predicates s) (functions s)
   putStr (DList.toList w)
   unless (conjectureRegistered s) $
@@ -259,11 +259,18 @@ translateUnit (Unit (Left (Atom txt)) (Formula (Standard Conjecture) (FOF formul
 translateUnit _ =
     failTransl "unsupported declaration"
 
+moveConjecturesAtEnd :: [Unit] -> [Unit]
+moveConjecturesAtEnd lst =
+    filter (not . isConj) lst ++ filter isConj lst
+    where
+      isConj (Unit _ (Formula (Standard Conjecture) _) _) = True
+      isConj _ = False
+
 translateFile :: Handle -> Translator ()
 translateFile h = do
   txt <- liftIO (Data.Text.IO.hGetContents h)
   case parseTPTPOnly txt of
-    Right tptp -> mapM_ translateUnit (units tptp)
+    Right tptp -> mapM_ translateUnit (moveConjecturesAtEnd (units tptp))
     Left s -> failTransl ("cannot parse file: " ++ s)
 
 --------------------------------------------------------------------------------
