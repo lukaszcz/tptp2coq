@@ -61,6 +61,8 @@ echo -n "Successes (< 60s): "
 echo -n "Successes (< 120s): "
 ./count_time.sh 120
 
+./list_successes.sh
+
 if [ -n "$4" ]; then
     echo "" | mail -s "Evaluation finished" "$4"
 fi
