@@ -125,15 +125,15 @@ isFoOutput = do
   s <- get
   return (foOutput s)
 
-runTranslator :: Bool -> String -> Translator a -> IO a
-runTranslator fo filename tr = do
+runTranslator :: Bool -> Bool -> String -> Translator a -> IO a
+runTranslator addEq fo filename tr = do
   ((a, w), s) <- runStateT (runWriterT tr) (TranslState filename 1 fo False False Map.empty Map.empty)
   unless fo $ putStrLn "From Hammer Require Import Tactics.\n"
-  printCoqHeader (fo && equalityRegistered s) (predicates s) (functions s)
+  printCoqHeader (addEq && equalityRegistered s) (predicates s) (functions s)
   putStr (DList.toList w)
   unless (conjectureRegistered s) $
          putStrLn ("\nTheorem conjecture_" ++ show (ident s) ++ " : False.\nProof.\n  " ++
-                   (if fo then "time solve [ firstorder ]" else "hprover") ++ ".\nQed.")
+                   (if fo then "time solve [ firstorder ]" else "time hprover") ++ ".\nQed.")
   printCoqFooter
   return a
 
@@ -242,7 +242,7 @@ translateUnit (Unit (Left (Atom txt)) (Formula (Standard ax) (FOF formula)) _)
           translateAxiom txt formula
 translateUnit (Unit (Left (Atom txt)) (Formula (Standard Conjecture) (FOF formula)) _) = do
   fo <- isFoOutput
-  when fo $ tellStrLn "\nSet Firstorder Depth 10."
+  when fo $ tellStrLn "\nSet Firstorder Depth 20."
   name <- getName txt
   registerConjecture
   tellStr "\nTheorem "
@@ -254,7 +254,7 @@ translateUnit (Unit (Left (Atom txt)) (Formula (Standard Conjecture) (FOF formul
   if fo then
       tellStrLn "  time solve [ firstorder ]."
   else
-      tellStrLn "  hprover."
+      tellStrLn "  time hprover."
   tellStrLn "Qed."
 translateUnit _ =
     failTransl "unsupported declaration"
@@ -280,8 +280,10 @@ main = do
   args <- getArgs
   case args of
     [ filename ] ->
-       withFile filename ReadMode (runTranslator False filename . translateFile)
+       withFile filename ReadMode (runTranslator False False filename . translateFile)
+    [ "-e", filename ] ->
+       withFile filename ReadMode (runTranslator True False filename . translateFile)
     [ "-f", filename ] ->
-       withFile filename ReadMode (runTranslator True filename . translateFile)
+       withFile filename ReadMode (runTranslator True True filename . translateFile)
     _ ->
        hPutStrLn stderr $ "Usage: tptp2coq file.p"
